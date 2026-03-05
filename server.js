@@ -1,10 +1,24 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { WebSocketServerTransport } from "@modelcontextprotocol/sdk/server/websocket.js";
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+
 import axios from "axios";
+import http from "http";
+import { WebSocketServer } from "ws";
+
+// Create HTTP server (required for Heroku)
+const port = process.env.PORT || 3000;
+
+const httpServer = http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end("MCP WebSocket Server Running");
+});
+
+// Create WebSocket server
+const wss = new WebSocketServer({ server: httpServer });
 
 const server = new Server(
   {
@@ -93,6 +107,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   throw new Error("Tool not found");
 });
 
-// 🚀 Start Server (stdio)
-const transport = new StdioServerTransport();
-await server.connect(transport);
+// 🔌 Handle WebSocket Connections
+wss.on("connection", async (socket) => {
+  const transport = new WebSocketServerTransport(socket);
+  await server.connect(transport);
+});
+
+httpServer.listen(port, () => {
+  console.log(`MCP WebSocket server running on port ${port}`);
+});
