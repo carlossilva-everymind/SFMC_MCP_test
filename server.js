@@ -10,26 +10,24 @@ import { WebSocketServer } from "ws";
 
 const port = process.env.PORT || 3000;
 
-/* ================================
-   HTTP SERVER (Required by Heroku)
-================================ */
+/* =========================
+   HTTP SERVER (Heroku)
+========================= */
 const httpServer = http.createServer((req, res) => {
   res.writeHead(200);
   res.end("MCP WebSocket Server Running");
 });
 
-/* ================================
+/* =========================
    MCP SERVER
-================================ */
-const mcpServer = new Server(
+========================= */
+const server = new Server(
   {
     name: "sfmc-mcp-server",
     version: "1.0.0",
   },
   {
-    capabilities: {
-      tools: {},
-    },
+    capabilities: { tools: {} },
   }
 );
 
@@ -58,11 +56,11 @@ async function getAccessToken() {
   return cachedToken;
 }
 
-/* ================================
+/* =========================
    TOOL DEFINITIONS
-================================ */
+========================= */
 
-mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
+server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
@@ -82,7 +80,7 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
-mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "getContactByKey") {
     const { dataExtensionKey, contactKey } = request.params.arguments;
 
@@ -109,35 +107,44 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
   throw new Error("Tool not found");
 });
 
-/* ================================
-   WEBSOCKET SERVER
-================================ */
+/* =========================
+   WEBSOCKET TRANSPORT
+========================= */
+
+class MCPWebSocketTransport {
+  constructor(socket) {
+    this.socket = socket;
+  }
+
+  async start() {}
+
+  async send(message) {
+    this.socket.send(JSON.stringify(message));
+  }
+
+  onMessage(callback) {
+    this.socket.on("message", (data) => {
+      callback(JSON.parse(data.toString()));
+    });
+  }
+
+  onClose(callback) {
+    this.socket.on("close", callback);
+  }
+}
 
 const wss = new WebSocketServer({ server: httpServer });
 
-wss.on("connection", (socket) => {
+wss.on("connection", async (socket) => {
   console.log("WebSocket client connected");
 
-  socket.on("message", async (message) => {
-    try {
-      const request = JSON.parse(message.toString());
-
-      const response = await mcpServer.handleRequest(request);
-
-      socket.send(JSON.stringify(response));
-    } catch (err) {
-      socket.send(
-        JSON.stringify({
-          error: err.message,
-        })
-      );
-    }
-  });
+  const transport = new MCPWebSocketTransport(socket);
+  await server.connect(transport);
 });
 
-/* ================================
-   START SERVER
-================================ */
+/* =========================
+   START
+========================= */
 
 httpServer.listen(port, () => {
   console.log(`Server running on port ${port}`);
