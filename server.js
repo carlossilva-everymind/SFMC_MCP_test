@@ -1,17 +1,30 @@
-import { Server } from "@modelcontextprotocol/sdk/server";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import axios from "axios";
 
-const server = new Server({
-  name: "sfmc-mcp-server",
-  version: "1.0.0",
-});
+const server = new Server(
+  {
+    name: "sfmc-mcp-server",
+    version: "1.0.0",
+  },
+  {
+    capabilities: {
+      tools: {},
+    },
+  }
+);
 
 let cachedToken = null;
 let tokenExpiresAt = 0;
 
-// 🔐 Get OAuth Token
+// 🔐 OAuth Token
 async function getAccessToken() {
   const now = Date.now();
+
   if (cachedToken && now < tokenExpiresAt) {
     return cachedToken;
   }
@@ -31,21 +44,32 @@ async function getAccessToken() {
   return cachedToken;
 }
 
-// 🛠 MCP Tool
-server.tool(
-  "getContactByKey",
-  {
-    description: "Retrieve a contact from a Data Extension by Contact Key",
-    inputSchema: {
-      type: "object",
-      properties: {
-        dataExtensionKey: { type: "string" },
-        contactKey: { type: "string" },
+// 📦 List Tools
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: [
+      {
+        name: "getContactByKey",
+        description:
+          "Retrieve a contact from a Data Extension by Contact Key",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dataExtensionKey: { type: "string" },
+            contactKey: { type: "string" },
+          },
+          required: ["dataExtensionKey", "contactKey"],
+        },
       },
-      required: ["dataExtensionKey", "contactKey"],
-    },
-  },
-  async ({ dataExtensionKey, contactKey }) => {
+    ],
+  };
+});
+
+// 🛠 Call Tool
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  if (request.params.name === "getContactByKey") {
+    const { dataExtensionKey, contactKey } = request.params.arguments;
+
     const token = await getAccessToken();
 
     const url = `${process.env.SFMC_REST_URL}/data/v1/customobjectdata/key/${dataExtensionKey}/rowset?$filter=ContactKey eq '${contactKey}'`;
@@ -56,8 +80,19 @@ server.tool(
       },
     });
 
-    return response.data;
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(response.data, null, 2),
+        },
+      ],
+    };
   }
-);
 
-server.start();
+  throw new Error("Tool not found");
+});
+
+// 🚀 Start Server (stdio)
+const transport = new StdioServerTransport();
+await server.connect(transport);
