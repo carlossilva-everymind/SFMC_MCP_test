@@ -1,5 +1,4 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { WebSocketServerTransport } from "@modelcontextprotocol/sdk/server/websocket.js";
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
@@ -9,18 +8,20 @@ import axios from "axios";
 import http from "http";
 import { WebSocketServer } from "ws";
 
-// Create HTTP server (required for Heroku)
 const port = process.env.PORT || 3000;
 
+/* ================================
+   HTTP SERVER (Required by Heroku)
+================================ */
 const httpServer = http.createServer((req, res) => {
   res.writeHead(200);
   res.end("MCP WebSocket Server Running");
 });
 
-// Create WebSocket server
-const wss = new WebSocketServer({ server: httpServer });
-
-const server = new Server(
+/* ================================
+   MCP SERVER
+================================ */
+const mcpServer = new Server(
   {
     name: "sfmc-mcp-server",
     version: "1.0.0",
@@ -35,7 +36,6 @@ const server = new Server(
 let cachedToken = null;
 let tokenExpiresAt = 0;
 
-// 🔐 OAuth Token
 async function getAccessToken() {
   const now = Date.now();
 
@@ -58,8 +58,11 @@ async function getAccessToken() {
   return cachedToken;
 }
 
-// 📦 List Tools
-server.setRequestHandler(ListToolsRequestSchema, async () => {
+/* ================================
+   TOOL DEFINITIONS
+================================ */
+
+mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
@@ -79,8 +82,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
-// 🛠 Call Tool
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "getContactByKey") {
     const { dataExtensionKey, contactKey } = request.params.arguments;
 
@@ -107,12 +109,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   throw new Error("Tool not found");
 });
 
-// 🔌 Handle WebSocket Connections
-wss.on("connection", async (socket) => {
-  const transport = new WebSocketServerTransport(socket);
-  await server.connect(transport);
+/* ================================
+   WEBSOCKET SERVER
+================================ */
+
+const wss = new WebSocketServer({ server: httpServer });
+
+wss.on("connection", (socket) => {
+  console.log("WebSocket client connected");
+
+  socket.on("message", async (message) => {
+    try {
+      const request = JSON.parse(message.toString());
+
+      const response = await mcpServer.handleRequest(request);
+
+      socket.send(JSON.stringify(response));
+    } catch (err) {
+      socket.send(
+        JSON.stringify({
+          error: err.message,
+        })
+      );
+    }
+  });
 });
 
+/* ================================
+   START SERVER
+================================ */
+
 httpServer.listen(port, () => {
-  console.log(`MCP WebSocket server running on port ${port}`);
+  console.log(`Server running on port ${port}`);
 });
